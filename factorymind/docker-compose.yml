@@ -1,0 +1,132 @@
+services:
+
+  # ─── Application ──────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: factorymind-app
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - .:/var/www
+      - ./storage:/var/www/storage
+    environment:
+      - APP_ENV=local
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - factorymind
+
+  # ─── Queue Worker (Horizon) ───────────────────────────────────
+  horizon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: factorymind-horizon
+    restart: unless-stopped
+    working_dir: /var/www
+    command: php artisan horizon
+    volumes:
+      - .:/var/www
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - factorymind
+
+  # ─── Scheduler ────────────────────────────────────────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: factorymind-scheduler
+    restart: unless-stopped
+    working_dir: /var/www
+    command: php artisan schedule:work
+    volumes:
+      - .:/var/www
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - factorymind
+
+  # ─── Nginx ────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: factorymind-nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - .:/var/www
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - factorymind
+
+  # ─── PostgreSQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: factorymind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: factorymind
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      PGDATA: /data/postgres
+    volumes:
+      - postgres_data:/data/postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - factorymind
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: factorymind-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - factorymind
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Meilisearch ──────────────────────────────────────────────
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: factorymind-search
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: factorymind-search-key
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      - "7700:7700"
+    networks:
+      - factorymind
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+
+networks:
+  factorymind:
+    driver: bridge
